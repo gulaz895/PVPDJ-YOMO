@@ -1,0 +1,345 @@
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+local Players, RunService, Camera, LocalPlayer, Mouse =
+    game:GetService("Players"), game:GetService("RunService"),
+    workspace.CurrentCamera, game.Players.LocalPlayer, game.Players.LocalPlayer:GetMouse()
+
+local Window = WindUI:CreateWindow({
+    Title = "YOMO HUB โ” v0.1๐’",
+    Icon = "zap",
+    Author = "My Didcos>    https://discord.gg/xWW3jhKM",
+    Folder = "GotHubFolder",
+    Size = UDim2.fromOffset(400, 200),
+    Theme = "Dark",
+    Transparent = true,
+    Resizable = true,
+})
+
+local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
+
+local SilentAimEnabled = false
+local FOVRadius = 120
+local CurrentTarget = nil
+
+local SilentFOVCircle = Drawing.new("Circle")
+SilentFOVCircle.Color = Color3.fromRGB(255, 0, 0)
+SilentFOVCircle.Thickness = 1.5
+SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Filled = false
+SilentFOVCircle.Transparency = 1
+SilentFOVCircle.Radius = FOVRadius
+SilentFOVCircle.Visible = false
+
+local Tracer = Drawing.new("Line")
+Tracer.Thickness = 1.5
+Tracer.Color = Color3.fromRGB(0, 255, 255)
+Tracer.Transparency = 1
+Tracer.Visible = false
+
+local function getPing()
+	local stats = LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild("NetworkStats")
+	if stats then
+		local pingText = stats:FindFirstChild("PingLabel")
+		if pingText then
+			local ping = tonumber(pingText.Text:match("%d+"))
+			return ping and ping/1000 or 0.2
+		end
+	end
+	return 0.2
+end
+
+local function getClosestTarget()
+	local closest = nil
+	local shortestDistance = math.huge
+	local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+			local head = player.Character.Head
+			local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+
+			if onScreen then
+				local screenPos = Vector2.new(pos.X, pos.Y)
+				local distFromCenter = (screenPos - center).Magnitude
+
+				
+				if distFromCenter <= FOVRadius then
+					
+					local toTarget = (head.Position - Camera.CFrame.Position).Unit
+					local forward = Camera.CFrame.LookVector
+					local dot = forward:Dot(toTarget)
+
+					if dot > 0.5 then
+						local distance3D = (head.Position - LocalPlayer.Character.Head.Position).Magnitude
+
+						
+						if distance3D < shortestDistance then
+							shortestDistance = distance3D
+							closest = player
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return closest
+end
+
+local function predictPosition(head, hrp)
+	local ping = getPing()
+	local velocity = hrp and hrp.Velocity or Vector3.zero
+	return head.Position + (velocity * ping * 1.15)
+end
+
+RunService.RenderStepped:Connect(function()
+	SilentFOVCircle.Visible = SilentAimEnabled
+	SilentFOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+	SilentFOVCircle.Radius = FOVRadius
+
+	if SilentAimEnabled then
+		CurrentTarget = getClosestTarget()
+	else
+		CurrentTarget = nil
+	end
+
+	if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+		local targetHead = CurrentTarget.Character.Head
+		local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+		if myHead then
+			local myScreenPos, myOnScreen = Camera:WorldToViewportPoint(myHead.Position)
+			local targetScreenPos, targetOnScreen = Camera:WorldToViewportPoint(targetHead.Position)
+			if myOnScreen and targetOnScreen then
+				Tracer.Visible = true
+				Tracer.From = Vector2.new(myScreenPos.X, myScreenPos.Y)
+				Tracer.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
+			else
+				Tracer.Visible = false
+			end
+		end
+	else
+		Tracer.Visible = false
+	end
+end)
+
+local oldFire
+oldFire = hookfunction(game:GetService("ReplicatedStorage").Remotes.Send.FireServer, function(self, ...)
+	local args = {...}
+	if SilentAimEnabled and args[2] == "shoot_gun" and CurrentTarget then
+		local head = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head")
+		local hrp = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+		if head then
+			local aimPos = predictPosition(head, hrp)
+
+			args[4] = CFrame.new(LocalPlayer.Character.Head.Position, aimPos)
+			args[5] = {
+				[1] = {
+					[1] = {
+						["Instance"] = head,
+						["Normal"] = Vector3.new(0, 1, 0),
+						["Position"] = aimPos
+					}
+				}
+			}
+
+			local beam = Instance.new("Part", workspace)
+			beam.Anchored = true
+			beam.CanCollide = false
+			beam.Size = Vector3.new(0.15, 0.15, (aimPos - LocalPlayer.Character.Head.Position).Magnitude)
+			beam.CFrame = CFrame.new(LocalPlayer.Character.Head.Position, aimPos) * CFrame.new(0, 0, -beam.Size.Z/2)
+			beam.Color = Color3.fromRGB(255, 50, 50)
+			beam.Material = Enum.Material.Neon
+			beam.Transparency = 0.25
+			game:GetService("Debris"):AddItem(beam, 0.15)
+		end
+	end
+	return oldFire(self, unpack(args))
+end)
+
+
+Tab:Toggle({
+	Title = "Silent Aim",
+	Default = false,
+	Callback = function(state)
+		SilentAimEnabled = state
+	end
+})
+
+Tab:Slider({
+    Title = "FOV: ",
+    Step = 1,
+    Value = {
+        Min = 20,
+        Max = 300,
+        Default = FOVRadius,
+    },
+    Callback = function(value)
+        FOVRadius = tonumber(value) or 120
+        print("FOV",FOVRadius)
+    end
+})
+
+local Tab_ESP = Window:Tab({
+    Title = "ESP",
+    Icon = "eye",
+})
+
+local boxESPEnabled = false
+local nameESPEnabled = false
+local distanceESPEnabled = false
+
+Tab_ESP:Toggle({
+    Title = "Box ESP",
+    Default = false,
+    Callback = function(state)
+        boxESPEnabled = state
+    end
+})
+
+Tab_ESP:Toggle({
+    Title = "Name ESP",
+    Default = false,
+    Callback = function(state)
+        nameESPEnabled = state
+    end
+})
+
+Tab_ESP:Toggle({
+    Title = "Distance ESP",
+    Default = false,
+    Callback = function(state)
+        distanceESPEnabled = state
+    end
+})
+local espConnections = {}
+
+local function createESP(player)
+    local lines = {
+        top = Drawing.new("Line"),
+        bottom = Drawing.new("Line"),
+        left = Drawing.new("Line"),
+        right = Drawing.new("Line"),
+    }
+
+    local nameText = Drawing.new("Text")
+    nameText.Size = 12
+    nameText.Center = true
+    nameText.Outline = true
+    nameText.Color = Color3.new(1,1,1)
+
+    local distanceText = Drawing.new("Text")
+    distanceText.Size = 10
+    distanceText.Center = true
+    distanceText.Outline = true
+    distanceText.Color = Color3.fromRGB(255, 255, 255)
+
+    for _, line in pairs(lines) do
+        line.Color = Color3.new(1, 1, 1)
+        line.Thickness = 1
+        line.Visible = false
+    end
+
+    nameText.Visible = false
+    distanceText.Visible = false
+
+    local conn = RunService.RenderStepped:Connect(function()
+        if not player.Character or not player.Character:FindFirstChild("Head") or not player.Character:FindFirstChild("HumanoidRootPart") then
+            for _, line in pairs(lines) do line.Visible = false end
+            nameText.Visible = false
+            distanceText.Visible = false
+            return
+        end
+
+        local head = player.Character.Head
+        local hrp = player.Character.HumanoidRootPart
+
+        local topWorld = head.Position + Vector3.new(0, 0.5, 0)
+        local bottomWorld = hrp.Position - Vector3.new(0, 3, 0)
+
+        local top, onTop = Camera:WorldToViewportPoint(topWorld)
+        local bottom, onBottom = Camera:WorldToViewportPoint(bottomWorld)
+
+        if onTop and onBottom and top.Z > 0 and bottom.Z > 0 then
+            local height = math.abs(top.Y - bottom.Y)
+            local width = height / 1.8
+            local x = top.X - width / 2
+            local y = top.Y
+
+            local tl = Vector2.new(x, y)
+            local tr = Vector2.new(x + width, y)
+            local bl = Vector2.new(x, y + height)
+            local br = Vector2.new(x + width, y + height)
+
+           
+            if boxESPEnabled then
+                lines.top.From = tl
+                lines.top.To = tr
+
+                lines.bottom.From = bl
+                lines.bottom.To = br
+
+                lines.left.From = tl
+                lines.left.To = bl
+
+                lines.right.From = tr
+                lines.right.To = br
+
+                for _, line in pairs(lines) do line.Visible = true end
+            else
+                for _, line in pairs(lines) do line.Visible = false end
+            end
+
+           
+            if nameESPEnabled then
+                nameText.Text = player.Name
+                nameText.Position = Vector2.new(top.X, y - 16)
+                nameText.Visible = true
+            else
+                nameText.Visible = false
+            end
+
+           
+            if distanceESPEnabled then
+                local dist = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"))
+                    and (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude or 0
+                distanceText.Text = string.format("%.0f Distance", dist)
+                distanceText.Position = Vector2.new(top.X, y + height + 4)
+                distanceText.Visible = true
+            else
+                distanceText.Visible = false
+            end
+        else
+            for _, line in pairs(lines) do line.Visible = false end
+            nameText.Visible = false
+            distanceText.Visible = false
+        end
+    end)
+
+    table.insert(espConnections, conn)
+end
+
+local function loadESP()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            createESP(player)
+        end
+    end
+
+    Players.PlayerAdded:Connect(function(player)
+        player.CharacterAdded:Connect(function()
+            wait(1)
+            createESP(player)
+        end)
+    end)
+end
+
+local function clearESP()
+    for _, conn in pairs(espConnections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            conn:Disconnect()
+        end
+    end
+    espConnections = {}
+end
+
+local Tab_FPS = Window:Tab({
+  
